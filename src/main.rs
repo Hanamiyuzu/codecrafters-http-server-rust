@@ -27,14 +27,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let request_lines = request_str.split("\r\n").collect::<Vec<_>>();
             if !request_lines.is_empty() {
                 let start_line = request_lines[0];
-                let start_parts = start_line.split(" ").collect::<Vec<_>>();
-                if start_parts.len() >= 2 && start_parts[1].starts_with("/echo/") {
-                    let response_content = &start_parts[1][6..];
-                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}", response_content.len(), response_content);
-                    println!("Response: {}", response);
-                    socket.write_all(response.as_bytes()).await.unwrap();
-                }
+                let response_content = match start_line.split(" ").nth(1) {
+                    Some(path) => match path {
+                        "/" => Ok(""),
+                        path if path.starts_with("/echo/") => Ok(&path[6..]),
+                        _ => Err(""),
+                    },
+                    _ => Err(""),
+                };
+                let response = match response_content {
+                    Ok(content) => build_response("200 OK", content),
+                    _ => build_response("404 Not Found", ""),
+                };
+                println!("Response: {}", response);
+                socket.write_all(response.as_bytes()).await.unwrap();
             }
         });
     }
+}
+
+fn build_response(status: &str, content: &str) -> String {
+    format!(
+        "HTTP/1.1 {}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+        status,
+        content.len(),
+        content
+    )
 }
