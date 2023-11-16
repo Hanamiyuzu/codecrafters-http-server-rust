@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use std::error::Error;
+use std::{collections::HashMap, error::Error};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -22,28 +22,48 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     break;
                 }
             }
-            let request_str = String::from_utf8_lossy(&buffer);
-            println!("Request: {}", request_str);
-            let request_lines = request_str.split("\r\n").collect::<Vec<_>>();
-            if !request_lines.is_empty() {
-                let start_line = request_lines[0];
-                let response_content = match start_line.split(" ").nth(1) {
-                    Some(path) => match path {
-                        "/" => Ok(""),
-                        path if path.starts_with("/echo/") => Ok(&path[6..]),
-                        _ => Err(""),
-                    },
-                    _ => Err(""),
-                };
-                let response = match response_content {
-                    Ok(content) => build_response("200 OK", content),
-                    _ => build_response("404 Not Found", ""),
-                };
-                println!("Response: {}", response);
-                socket.write_all(response.as_bytes()).await.unwrap();
-            }
+            let request = String::from_utf8_lossy(&buffer);
+            println!("Request: {}", request);
+            let response = parse_request(&request);
+            let response = match response {
+                Ok(response) => response,
+                Err(_) => build_response("400 Bad Request", ""),
+            };
+            println!("Response: {}", response);
+            socket.write_all(response.as_bytes()).await.unwrap();
         });
     }
+}
+
+fn parse_request(request: &str) -> Result<String, ()> {
+    let request_lines = request
+        .split("\r\n")
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+    if !request_lines.is_empty() {
+        let mut request_body = HashMap::new();
+        for line in &request_lines[1..] {
+            if let Some((key, value)) = line.split_once(": ") {
+                request_body.insert(key, value);
+            }
+        }
+        let start_line = request_lines[0];
+        let response_content = match start_line.split(" ").nth(1) {
+            Some(path) => match path {
+                "/" => Ok(""),
+                "/user-agent" => Ok(request_body["User-Agent"]),
+                path if path.starts_with("/echo/") => Ok(&path[6..]),
+                _ => Err(""),
+            },
+            _ => Err(""),
+        };
+        let response = match response_content {
+            Ok(content) => build_response("200 OK", content),
+            _ => build_response("404 Not Found", ""),
+        };
+        return Ok(response);
+    }
+    Err(())
 }
 
 fn build_response(status: &str, content: &str) -> String {
